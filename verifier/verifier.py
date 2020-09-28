@@ -1,7 +1,6 @@
 # TODO: Accept multiple addresses for email verification
 # TODO: Handle errors according to status code.
 # TODO: Retry on some responses.
-
 import binascii
 import os
 from collections import namedtuple
@@ -11,33 +10,36 @@ import smtplib
 import socks
 
 from dns import resolver
-from socks_smtp import SocksSMTP as SMTP
+from .socks_smtp import SocksSMTP as SMTP
 
 blocked_keywords = ["spamhaus",
-			"proofpoint",
-			"cloudmark",
-			"banned",
-			"blacklisted",
-			"blocked",
-			"block list",
-			"denied"]
+                    "proofpoint",
+                    "cloudmark",
+                    "banned",
+                    "blacklisted",
+                    "blocked",
+                    "block list",
+                    "denied"]
 
 proxy = {
     'socks4': socks.SOCKS4,
     'socks5': socks.SOCKS5,
-    'http': socks.HTTP # does not guareentee it will work with HTTP
+    'http': socks.HTTP  # does not guareentee it will work with HTTP
 }
+
 
 class UnknownProxyError(Exception):
     def __init__(self, proxy_type):
         self.msg = f"The proxy type {proxy_type} is not known\n Try one of socks4, socks5 or http"
 
+
 class EmailFormatError(Exception):
-    
+
     def __init__(self, msg):
         self.msg = msg
 
-class SMTPRecepientException(Exception): # don't cover
+
+class SMTPRecepientException(Exception):  # don't cover
 
     def __init__(self, code, response):
         self.code = code
@@ -75,21 +77,24 @@ handle_error = {
     441: lambda _: dict(deliverable=True, full_inbox=True, host_exists=True)
 }
 
-handle_unrecognised = lambda a: dict(message=f"Unrecognised error: {a}", deliverable=False)
+
+def handle_unrecognised(a): return dict(
+    message=f"Unrecognised error: {a}", deliverable=False)
 
 
 # create a namedtuple to hold the email address
 Address = namedtuple("Address", ["name", "addr", "username", "domain"])
 
+
 class Verifier:
 
     def __init__(self,
                  source_addr,
-                 proxy_type = None,
-                 proxy_addr = None,
-                 proxy_port = None,
-                 proxy_username = None,
-                 proxy_password = None):
+                 proxy_type=None,
+                 proxy_addr=None,
+                 proxy_port=None,
+                 proxy_username=None,
+                 proxy_password=None):
         """
         Initializes the Verifier object with proxy settings.
         :param proxy_type: One of `SOCKS4`, `SOCKS5` or `HTTP`.
@@ -110,7 +115,7 @@ class Verifier:
         self.proxy_port = proxy_port
         self.proxy_username = proxy_username
         self.proxy_password = proxy_password
-    
+
     def _parse_address(self, email) -> Address:
         """
         Parses the email address provided and splits it 
@@ -127,17 +132,17 @@ class Verifier:
         except IndexError:
             raise EmailFormatError(f"address provided is invalid: {email}")
         return Address(name, addr, username, domain)
-    
+
     def _random_email(self, domain):
         """
         This method generates a random email by using the os.urandom
         for the domain provided in the parameter.
         """
         return f'{binascii.hexlify(os.urandom(20)).decode()}@{domain}'
-    
+
     def _can_deliver(self,
-                     exchange : str,
-                     address : str):
+                     exchange: str,
+                     address: str):
         """
         Checks the deliverablity of an email to the given mail_exchange.
         Creates a connection using the SMTP and tries to add the email to 
@@ -150,11 +155,11 @@ class Verifier:
         """
         host_exists = False
         with SMTP(exchange[1],
-                proxy_type=self.proxy_type,
-                proxy_addr=self.proxy_addr,
-                proxy_port=self.proxy_port,
-                proxy_username=self.proxy_username,
-                proxy_password=self.proxy_password) as smtp:
+                  proxy_type=self.proxy_type,
+                  proxy_addr=self.proxy_addr,
+                  proxy_port=self.proxy_port,
+                  proxy_username=self.proxy_username,
+                  proxy_password=self.proxy_password) as smtp:
             host_exists = True
             smtp.helo()
             smtp.mail(self.source_addr)
@@ -189,11 +194,12 @@ class Verifier:
         except EmailFormatError:
             lookup['address'] = f"{email}"
             return lookup
-        
+
         # look for mx record and create a list of mail exchanges
         try:
             mx_record = resolver.query(lookup['address'].domain, 'MX')
-            mail_exchangers = [exchange.to_text().split() for exchange in mx_record]
+            mail_exchangers = [exchange.to_text().split()
+                               for exchange in mx_record]
             lookup['host_exists'] = True
         except (resolver.NoAnswer, resolver.NXDOMAIN, resolver.NoNameservers):
             lookup['host_exists'] = False
@@ -201,7 +207,8 @@ class Verifier:
 
         for exchange in mail_exchangers:
             try:
-                host_exists, deliverable, catch_all = self._can_deliver(exchange, lookup['address'])
+                host_exists, deliverable, catch_all = self._can_deliver(
+                    exchange, lookup['address'])
                 if deliverable:
                     lookup['host_exists'] = host_exists
                     lookup['deliverable'] = deliverable
@@ -209,7 +216,8 @@ class Verifier:
                     break
             except SMTPRecepientException as err:
                 # Error handlers return a dict that is then merged with 'lookup'
-                kwargs = handle_error.get(err.code, handle_unrecognised)(err.response)
+                kwargs = handle_error.get(
+                    err.code, handle_unrecognised)(err.response)
                 # This expression merges the lookup dict with kwargs
                 lookup = {**lookup, **kwargs}
 
@@ -219,9 +227,10 @@ class Verifier:
                 lookup['message'] = "Internal Error. Maybe blacklisted"
 
         return lookup
-    
+
+
 if __name__ == "__main__":
     v = Verifier(source_addr='user@example.com')
     email = input('Enter email to verify: ')
     l = v.verify(email)
-    pprint.pprint(l)       
+    pprint.pprint(l)
